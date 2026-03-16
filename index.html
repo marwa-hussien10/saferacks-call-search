@@ -4,17 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SafeRacks Call Search</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
-  .header { background: #1a1a2e; color: white; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+  .header { background: #1a1a2e; color: white; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
   .header h1 { font-size: 18px; font-weight: 500; }
+  .user-info { font-size: 13px; color: #aaa; display: flex; align-items: center; gap: 12px; }
+  .sign-out { background: none; border: 1px solid #555; color: #aaa; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .sign-out:hover { border-color: #aaa; color: white; }
   .container { max-width: 900px; margin: 24px auto; padding: 0 16px; }
-  .config-box { background: white; border-radius: 8px; border: 1px solid #e0e0e0; padding: 16px 20px; margin-bottom: 20px; }
-  .config-box h3 { font-size: 13px; font-weight: 500; color: #666; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .config-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
-  .config-row label { font-size: 13px; color: #666; min-width: 90px; }
-  .config-row input { flex: 1; padding: 7px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
+  .login-box { background: white; border-radius: 8px; border: 1px solid #e0e0e0; padding: 40px; text-align: center; margin-top: 60px; }
+  .login-box h2 { font-size: 20px; font-weight: 500; margin-bottom: 8px; }
+  .login-box p { font-size: 14px; color: #666; margin-bottom: 24px; }
   .search-bar { display: flex; gap: 8px; margin-bottom: 6px; }
   .search-bar input { flex: 1; padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; }
   .search-bar input:focus { outline: none; border-color: #4f86f7; box-shadow: 0 0 0 3px rgba(79,134,247,0.15); }
@@ -41,33 +43,74 @@
 </style>
 </head>
 <body>
+
 <div class="header">
   <h1>SafeRacks — Call History Search</h1>
+  <div class="user-info">
+    <span id="user-name"></span>
+    <button class="sign-out" id="sign-out-btn" style="display:none" onclick="signOut()">Sign out</button>
+  </div>
 </div>
+
 <div class="container">
-  <div class="config-box">
-    <h3>Connection settings</h3>
-    <div class="config-row">
-      <label>Project ID</label>
-      <input type="text" id="projectId" value="customer-service-archive" />
+  <div id="login-section" class="login-box">
+    <h2>Sign in to continue</h2>
+    <p>Use your Google account to access the call history search.</p>
+    <div id="g_id_onload"
+      data-client_id="930547608843-d97sen1u32p0i3a98bdv88bsbc0p55kp.apps.googleusercontent.com"
+      data-callback="handleCredential"
+      data-auto_prompt="false">
     </div>
-    <div class="config-row">
-      <label>API Key</label>
-      <input type="password" id="apiKey" placeholder="Paste your Google API key here" />
+    <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline" data-text="sign_in_with" data-shape="rectangular"></div>
+  </div>
+
+  <div id="search-section" style="display:none;">
+    <div class="search-bar">
+      <input type="text" id="searchInput" placeholder="Search by phone, agent, interaction ID, disposition, description..." />
+      <button onclick="runSearch()">Search</button>
     </div>
+    <div class="search-hint">Searches across all fields — partial matches work (e.g. "john" finds "John Smith")</div>
+    <div id="error" style="display:none;" class="error-msg"></div>
+    <div id="loading" style="display:none;" class="loading">Searching 1.18 million records...</div>
+    <div id="results-count" class="results-count"></div>
+    <div id="results"></div>
+    <div id="empty" class="empty-state">Enter any search term to find matching calls</div>
   </div>
-  <div class="search-bar">
-    <input type="text" id="searchInput" placeholder="Search by phone, agent, interaction ID, disposition, description..." />
-    <button onclick="runSearch()">Search</button>
-  </div>
-  <div class="search-hint">Searches across all fields — partial matches work (e.g. "john" finds "John Smith")</div>
-  <div id="error" style="display:none;" class="error-msg"></div>
-  <div id="loading" style="display:none;" class="loading">Searching 1.18 million records...</div>
-  <div id="results-count" class="results-count"></div>
-  <div id="results"></div>
-  <div id="empty" class="empty-state">Enter any search term to find matching calls</div>
 </div>
+
 <script>
+const PROJECT_ID = 'customer-service-archive';
+let accessToken = null;
+
+function handleCredential(response) {
+  const payload = JSON.parse(atob(response.credential.split('.')[1]));
+  document.getElementById('user-name').textContent = payload.email;
+  document.getElementById('sign-out-btn').style.display = 'inline-block';
+  document.getElementById('login-section').style.display = 'none';
+  document.getElementById('search-section').style.display = 'block';
+  accessToken = response.credential;
+  initTokenClient();
+}
+
+let tokenClient;
+function initTokenClient() {
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: '930547608843-d97sen1u32p0i3a98bdv88bsbc0p55kp.apps.googleusercontent.com',
+    scope: 'https://www.googleapis.com/auth/bigquery.readonly',
+    callback: (tokenResponse) => { accessToken = tokenResponse.access_token; }
+  });
+  tokenClient.requestAccessToken({prompt: ''});
+}
+
+function signOut() {
+  google.accounts.id.disableAutoSelect();
+  accessToken = null;
+  document.getElementById('login-section').style.display = 'block';
+  document.getElementById('search-section').style.display = 'none';
+  document.getElementById('sign-out-btn').style.display = 'none';
+  document.getElementById('user-name').textContent = '';
+}
+
 function getBadgeClass(t) {
   if (!t) return 'badge-inbound';
   t = t.toLowerCase();
@@ -85,12 +128,15 @@ function highlight(text, term) {
   const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return String(text).replace(new RegExp('(' + esc + ')', 'gi'), '<mark>$1</mark>');
 }
+
 async function runSearch() {
-  const apiKey = document.getElementById('apiKey').value.trim();
-  const projectId = document.getElementById('projectId').value.trim();
   const term = document.getElementById('searchInput').value.trim();
   if (!term) return;
-  if (!apiKey) { showError('Please enter your API key in the connection settings above.'); return; }
+  if (!accessToken) { 
+    tokenClient.requestAccessToken({prompt: ''});
+    setTimeout(runSearch, 1500);
+    return; 
+  }
   document.getElementById('empty').style.display = 'none';
   document.getElementById('results').innerHTML = '';
   document.getElementById('results-count').textContent = '';
@@ -99,16 +145,19 @@ async function runSearch() {
   const val = term.replace(/'/g, "\\'");
   const fields = ['Interaction ID','Call Type','Customer Phone Number','Talkdesk Phone Number','Agent Name','Disposition Code','Description','Team','Handling Agent','Tags','Phone Display Name','Disposition Set','Nested Disposition','Text Custom Field N1','Text Custom Field N2'];
   const where = fields.map(f => 'LOWER(CAST(`' + f + '` AS STRING)) LIKE LOWER(\'%' + val + '%\')').join(' OR ');
-  const query = 'SELECT `Interaction ID`, `Call Type`, `Start Time`, `Customer Phone Number`, `Agent Name`, `Talk Time`, `Waiting Time`, `Disposition Code`, `Description`, `Team` FROM `' + projectId + '.call_data.talkdesk_calls` WHERE ' + where + ' ORDER BY `Start Time` DESC LIMIT 50';
+  const query = 'SELECT `Interaction ID`, `Call Type`, `Start Time`, `Customer Phone Number`, `Agent Name`, `Talk Time`, `Waiting Time`, `Disposition Code`, `Description`, `Team` FROM `' + PROJECT_ID + '.call_data.talkdesk_calls` WHERE ' + where + ' ORDER BY `Start Time` DESC LIMIT 50';
   try {
-    const resp = await fetch('https://bigquery.googleapis.com/bigquery/v2/projects/' + projectId + '/queries?key=' + apiKey, {
+    const resp = await fetch('https://bigquery.googleapis.com/bigquery/v2/projects/' + PROJECT_ID + '/queries', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken},
       body: JSON.stringify({query, useLegacySql: false, timeoutMs: 30000})
     });
     const data = await resp.json();
     document.getElementById('loading').style.display = 'none';
-    if (data.error) { showError(data.error.message); return; }
+    if (data.error) { 
+      if (data.error.code === 401) { tokenClient.requestAccessToken({prompt: ''}); setTimeout(runSearch, 1500); return; }
+      showError(data.error.message); return; 
+    }
     const rows = data.rows || [];
     document.getElementById('results-count').textContent = rows.length + ' call' + (rows.length !== 1 ? 's' : '') + ' found' + (rows.length === 50 ? ' (showing latest 50)' : '');
     if (rows.length === 0) { document.getElementById('results').innerHTML = '<div class="empty-state">No calls found matching that search.</div>'; return; }
