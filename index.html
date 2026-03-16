@@ -147,7 +147,7 @@ async function runSearch() {
   const val = term.replace(/'/g, "\\'");
   const fields = ['Interaction ID','Call Type','Customer Phone Number','Talkdesk Phone Number','Agent Name','Disposition Code','Description','Team','Handling Agent','Tags','Phone Display Name','Disposition Set','Nested Disposition','Text Custom Field N1','Text Custom Field N2'];
   const where = fields.map(f => 'LOWER(CAST(`' + f + '` AS STRING)) LIKE LOWER(\'%' + val + '%\')').join(' OR ');
-  const query = 'SELECT `Interaction ID`, `Call Type`, `Start Time`, `Customer Phone Number`, `Agent Name`, `Talk Time`, `Waiting Time`, `Disposition Code`, `Description`, `Team` FROM `' + PROJECT_ID + '.call_data.talkdesk_calls` WHERE ' + where + ' ORDER BY `Start Time` DESC LIMIT 50';
+  const query = 'SELECT `Interaction ID`, `Call Type`, `Start Time`, `Customer Phone Number`, `Talkdesk Phone Number`, `Agent Name`, `Talk Time`, `Waiting Time`, `Holding Time`, `Agent Speed to Answer`, `Disposition Code`, `Description`, `Team`, `In Business Hours_`, `Callback From Queue_`, `Phone Display Name`, `Transfer_`, `Agent Disconnected` FROM `' + PROJECT_ID + '.call_data.talkdesk_calls` WHERE ' + where + ' ORDER BY `Start Time` DESC LIMIT 50';
   try {
     const resp = await fetch('https://bigquery.googleapis.com/bigquery/v2/projects/' + PROJECT_ID + '/queries', {
       method: 'POST',
@@ -162,12 +162,13 @@ async function runSearch() {
     if (rows.length === 0) { document.getElementById('results').innerHTML = '<div class="empty-state">No calls found matching that search.</div>'; return; }
     document.getElementById('results').innerHTML = rows.map(row => {
       const v = row.f;
-      const id = v[0]?.v||'-', type = v[1]?.v||'-', time = v[2]?.v||'-', phone = v[3]?.v||'-';
-      const agent = v[4]?.v||'-', talk = v[5]?.v||'-', wait = v[6]?.v||'-', disp = v[7]?.v||'-';
-      const desc = v[8]?.v||'-', team = v[9]?.v||'-';
+     const id = v[0]?.v||'-', type = v[1]?.v||'-', time = v[2]?.v||'-', phone = v[3]?.v||'-';
+const tdPhone = v[4]?.v||'-', agent = v[5]?.v||'-', talk = v[6]?.v||'-', wait = v[7]?.v||'-';
+const hold = v[8]?.v||'-', asa = v[9]?.v||'-', disp = v[10]?.v||'-', desc = v[11]?.v||'-';
+const team = v[12]?.v||'-', bizHours = v[13]?.v||'-', callback = v[14]?.v||'-';
+const displayName = v[15]?.v||'-', transfer = v[16]?.v||'-', agentDisc = v[17]?.v||'-';
       const h = t => highlight(t, term);
-      return '<div class="call-card"><div class="call-card-top"><div><span class="badge ' + getBadgeClass(type) + '">' + type + '</span><span class="interaction-id">' + h(id) + '</span></div><div class="call-date">' + formatDate(time) + '</div></div><div class="call-meta"><div class="meta-item">Phone <span>' + h(phone) + '</span></div><div class="meta-item">Agent <span>' + h(agent) + '</span></div><div class="meta-item">Talk <span>' + talk + '</span></div><div class="meta-item">Wait <span>' + wait + '</span></div><div class="meta-item">Team <span>' + h(team) + '</span></div><div class="meta-item">Disposition <span>' + h(disp) + '</span></div></div>' + (desc && desc !== '-' && desc !== 'null' ? '<div class="call-desc">' + h(desc) + '</div>' : '') + '</div>';
-    }).join('');
+return '<div class="call-card"><div class="call-card-top"><div><span class="badge ' + getBadgeClass(type) + '">' + type + '</span><span class="interaction-id">' + h(id) + '</span></div><div class="call-date">' + formatDate(time) + '</div></div><div class="call-meta"><div class="meta-item">Customer # <span>' + h(phone) + '</span></div><div class="meta-item">Talkdesk # <span>' + h(tdPhone) + '</span></div><div class="meta-item">Display name <span>' + h(displayName) + '</span></div><div class="meta-item">Agent <span>' + h(agent) + '</span></div><div class="meta-item">Team <span>' + h(team) + '</span></div><div class="meta-item">Talk <span>' + talk + '</span></div><div class="meta-item">Wait <span>' + wait + '</span></div><div class="meta-item">Hold <span>' + hold + '</span></div><div class="meta-item">Speed to answer <span>' + asa + '</span></div><div class="meta-item">Disposition <span>' + h(disp) + '</span></div><div class="meta-item">Transfer <span>' + transfer + '</span></div><div class="meta-item">Agent disconnected <span>' + agentDisc + '</span></div><div class="meta-item">Business hours <span>' + bizHours + '</span></div><div class="meta-item">Callback from queue <span>' + callback + '</span></div></div>' + (desc && desc !== '-' && desc !== 'null' ? '<div class="call-desc">' + h(desc) + '</div>' : '') + '</div>';    }).join('');
   } catch(e) { document.getElementById('loading').style.display = 'none'; showError('Connection error: ' + e.message); }
 }
 function showError(msg) { const el = document.getElementById('error'); el.textContent = msg; el.style.display = 'block'; }
