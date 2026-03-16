@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SafeRacks Call Search</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+  .header { background: #1a1a2e; color: white; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+  .header h1 { font-size: 18px; font-weight: 500; }
+  .container { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+  .config-box { background: white; border-radius: 8px; border: 1px solid #e0e0e0; padding: 16px 20px; margin-bottom: 20px; }
+  .config-box h3 { font-size: 13px; font-weight: 500; color: #666; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .config-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .config-row label { font-size: 13px; color: #666; min-width: 90px; }
+  .config-row input { flex: 1; padding: 7px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
+  .search-bar { display: flex; gap: 8px; margin-bottom: 6px; }
+  .search-bar input { flex: 1; padding: 10px 14px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; }
+  .search-bar input:focus { outline: none; border-color: #4f86f7; box-shadow: 0 0 0 3px rgba(79,134,247,0.15); }
+  .search-bar button { padding: 10px 20px; background: #1a1a2e; color: white; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+  .search-bar button:hover { background: #2d2d4e; }
+  .search-hint { font-size: 12px; color: #999; margin-bottom: 20px; }
+  .results-count { font-size: 13px; color: #666; margin-bottom: 12px; }
+  .call-card { background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px 18px; margin-bottom: 8px; }
+  .call-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
+  .badge-inbound { background: #e8f0fe; color: #1a73e8; }
+  .badge-outbound { background: #e6f4ea; color: #1e8e3e; }
+  .badge-abandoned { background: #fef7e0; color: #b06000; }
+  .interaction-id { font-size: 11px; color: #999; margin-left: 8px; font-family: monospace; }
+  .call-date { font-size: 13px; color: #666; }
+  .call-meta { display: flex; gap: 20px; flex-wrap: wrap; }
+  .meta-item { font-size: 12px; color: #888; }
+  .meta-item span { color: #333; font-weight: 500; }
+  .call-desc { font-size: 12px; color: #666; margin-top: 10px; padding-top: 10px; border-top: 1px solid #f0f0f0; }
+  .empty-state { text-align: center; padding: 48px 16px; color: #999; font-size: 14px; }
+  .error-msg { color: #c62828; font-size: 13px; padding: 12px; background: #fdecea; border-radius: 6px; margin-bottom: 16px; }
+  .loading { text-align: center; padding: 32px; color: #666; font-size: 14px; }
+  mark { background: #fff176; border-radius: 2px; padding: 0 1px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>SafeRacks — Call History Search</h1>
+</div>
+<div class="container">
+  <div class="config-box">
+    <h3>Connection settings</h3>
+    <div class="config-row">
+      <label>Project ID</label>
+      <input type="text" id="projectId" value="customer-service-archive" />
+    </div>
+    <div class="config-row">
+      <label>API Key</label>
+      <input type="password" id="apiKey" placeholder="Paste your Google API key here" />
+    </div>
+  </div>
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="Search by phone, agent, interaction ID, disposition, description..." />
+    <button onclick="runSearch()">Search</button>
+  </div>
+  <div class="search-hint">Searches across all fields — partial matches work (e.g. "john" finds "John Smith")</div>
+  <div id="error" style="display:none;" class="error-msg"></div>
+  <div id="loading" style="display:none;" class="loading">Searching 1.18 million records...</div>
+  <div id="results-count" class="results-count"></div>
+  <div id="results"></div>
+  <div id="empty" class="empty-state">Enter any search term to find matching calls</div>
+</div>
+<script>
+function getBadgeClass(t) {
+  if (!t) return 'badge-inbound';
+  t = t.toLowerCase();
+  if (t.includes('outbound')) return 'badge-outbound';
+  if (t.includes('abandon')) return 'badge-abandoned';
+  return 'badge-inbound';
+}
+function formatDate(ts) {
+  if (!ts) return '-';
+  try { return new Date(ts).toLocaleString('en-US', {month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}); }
+  catch(e) { return ts; }
+}
+function highlight(text, term) {
+  if (!text || text === 'null' || !term) return text || '-';
+  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(text).replace(new RegExp('(' + esc + ')', 'gi'), '<mark>$1</mark>');
+}
+async function runSearch() {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const projectId = document.getElementById('projectId').value.trim();
+  const term = document.getElementById('searchInput').value.trim();
+  if (!term) return;
+  if (!apiKey) { showError('Please enter your API key in the connection settings above.'); return; }
+  document.getElementById('empty').style.display = 'none';
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('results-count').textContent = '';
+  document.getElementById('error').style.display = 'none';
+  document.getElementById('loading').style.display = 'block';
+  const val = term.replace(/'/g, "\\'");
+  const fields = ['Interaction ID','Call Type','Customer Phone Number','Talkdesk Phone Number','Agent Name','Disposition Code','Description','Team','Handling Agent','Tags','Phone Display Name','Disposition Set','Nested Disposition','Text Custom Field N1','Text Custom Field N2'];
+  const where = fields.map(f => 'LOWER(CAST(`' + f + '` AS STRING)) LIKE LOWER(\'%' + val + '%\')').join(' OR ');
+  const query = 'SELECT `Interaction ID`, `Call Type`, `Start Time`, `Customer Phone Number`, `Agent Name`, `Talk Time`, `Waiting Time`, `Disposition Code`, `Description`, `Team` FROM `' + projectId + '.call_data.talkdesk_calls` WHERE ' + where + ' ORDER BY `Start Time` DESC LIMIT 50';
+  try {
+    const resp = await fetch('https://bigquery.googleapis.com/bigquery/v2/projects/' + projectId + '/queries?key=' + apiKey, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query, useLegacySql: false, timeoutMs: 30000})
+    });
+    const data = await resp.json();
+    document.getElementById('loading').style.display = 'none';
+    if (data.error) { showError(data.error.message); return; }
+    const rows = data.rows || [];
+    document.getElementById('results-count').textContent = rows.length + ' call' + (rows.length !== 1 ? 's' : '') + ' found' + (rows.length === 50 ? ' (showing latest 50)' : '');
+    if (rows.length === 0) { document.getElementById('results').innerHTML = '<div class="empty-state">No calls found matching that search.</div>'; return; }
+    document.getElementById('results').innerHTML = rows.map(row => {
+      const v = row.f;
+      const id = v[0]?.v||'-', type = v[1]?.v||'-', time = v[2]?.v||'-', phone = v[3]?.v||'-';
+      const agent = v[4]?.v||'-', talk = v[5]?.v||'-', wait = v[6]?.v||'-', disp = v[7]?.v||'-';
+      const desc = v[8]?.v||'-', team = v[9]?.v||'-';
+      const h = t => highlight(t, term);
+      return '<div class="call-card"><div class="call-card-top"><div><span class="badge ' + getBadgeClass(type) + '">' + type + '</span><span class="interaction-id">' + h(id) + '</span></div><div class="call-date">' + formatDate(time) + '</div></div><div class="call-meta"><div class="meta-item">Phone <span>' + h(phone) + '</span></div><div class="meta-item">Agent <span>' + h(agent) + '</span></div><div class="meta-item">Talk <span>' + talk + '</span></div><div class="meta-item">Wait <span>' + wait + '</span></div><div class="meta-item">Team <span>' + h(team) + '</span></div><div class="meta-item">Disposition <span>' + h(disp) + '</span></div></div>' + (desc && desc !== '-' && desc !== 'null' ? '<div class="call-desc">' + h(desc) + '</div>' : '') + '</div>';
+    }).join('');
+  } catch(e) { document.getElementById('loading').style.display = 'none'; showError('Connection error: ' + e.message); }
+}
+function showError(msg) { const el = document.getElementById('error'); el.textContent = msg; el.style.display = 'block'; }
+document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+</script>
+</body>
+</html>
